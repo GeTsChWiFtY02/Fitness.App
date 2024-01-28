@@ -1,52 +1,49 @@
 const express = require('express');
 const router = express.Router();
-const {
-    getRoutineActivityById,
-    getRoutineById,
-    updateRoutineActivity,
-    destroyRoutineActivity,
-  } = require("../db");
+const { updateRoutineActivity, canEditRoutineActivity, destroyRoutineActivity, getRoutineActivityById } = require('../db');
+const client = require('../db/client');
+const { requireUser, requiredNotSent } = require('./utils')
+
+
+
 // PATCH /api/routine_activities/:routineActivityId
-router.patch('/:routineActivityId', async (req, res, next) => {
-    const { count, duration } = req.body;
-    const id = req.params.routineActivityId;
-    try {
-      const routineActivity = await getRoutineActivityById(id);
-      const routine = await getRoutineById(routineActivity.routineId);
-      if (req.user.id !== routine.creatorId) {
-        next({ name: "Must be a user" });
+router.patch('/:routineActivityId', requireUser, requiredNotSent({requiredParams: ['count', 'duration'], atLeastOne: true}), async (req, res, next) => {
+  try {
+    const {count, duration} = req.body;
+    const {routineActivityId} = req.params;
+    const routineActivityToUpdate = await getRoutineActivityById(routineActivityId);
+    if(!routineActivityToUpdate) {
+      next({
+        name: 'NotFound',
+        message: `No routine_activity found by ID ${routineActivityId}`
+      })
+    } else {
+      if(!await canEditRoutineActivity(req.params.routineActivityId, req.user.id)) {
+        res.status(403);
+        next({name: "Unauthorized", message: "You cannot edit this routine_activity!"});
       } else {
-        const updatedRoutineAct = await updateRoutineActivity({
-          id,
-          count,
-          duration,
-        });
-        if (updatedRoutineAct) {
-          res.send(updatedRoutineAct);
-        } else {
-          next({ name: "Routine does not exist" });
-        }
+        const updatedRoutineActivity = await updateRoutineActivity({id: req.params.routineActivityId, count, duration})
+        res.send(updatedRoutineActivity);
       }
-    } catch (error) {
-      next(error);
     }
+  } catch (error) {
+    next(error);
   }
-);
+});
+
 // DELETE /api/routine_activities/:routineActivityId
-router.delete("/:routineActivityId", async (req, res, next) => {
-      const { routineActivityId } = req.params;
-      try {
-        const routineActivity = await getRoutineActivityById(routineActivityId);
-        const routine = await getRoutineById(routineActivity.routineId);
-        if (req.user.id === routine.creatorId) {
-          const destroyActivity = await destroyRoutineActivity(routineActivityId);
-          res.send(destroyActivity);
-        } else {
-          next({ message: "Error: Only the creator can delete a routine"});
-        }
-      } catch ({ message }) {
-        next({ message });
-      }
+router.delete('/:routineActivityId', requireUser, async (req, res, next) => {
+  try {
+    if(!await canEditRoutineActivity(req.params.routineActivityId, req.user.id)) {
+      res.status(403);
+      next({name: "Unauthorized", message: "You cannot edit this routine_activity!"});
+    } else {
+      const deletedRoutineActivity = await destroyRoutineActivity(req.params.routineActivityId)
+      res.send({success: true, ...deletedRoutineActivity});
     }
-  )
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

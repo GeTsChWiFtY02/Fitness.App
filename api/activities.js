@@ -1,71 +1,81 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
-const { requireUser } = require("./utilities");
-const { createActivity, updateActivity, getAllActivities, getPublicRoutinesByActivity } = require("../db");
-// GET /api/activities/:activityId/routines
-router.get('/:activityId/routines', async (req, res, next) => {
-    try {
-      const id = req.params.activityId;
-      const activity = { id: id };
-      const routines = await getPublicRoutinesByActivity(activity);
-      if (routines.length === 0)
-        res.send({
-          message: `Activity ${id} not found`,
-          name: 'ActivityDoesNotExistError',
-          error: 'Activity does not exist',
-        });
-      res.send(routines);
-    } catch ({ name, message }) {
-      next({ name, message });
-    }
-  })
-// GET /api/activities
-router.get('/', async (req, res) => {
-  const activities = await getAllActivities();
-  res.send({ activities });
-});
-// POST /api/activities
-router.post('/', requireUser, async (req, res, next) => {
-  const { name, description } = req.body;
-  const activityData = { name, description };
+const { getAllActivities, getActivityById, getActivityByName, createActivity, updateActivity, getPublicRoutinesByActivity } = require('../db');
+const { requireUser, requiredNotSent } = require('./utils')
+
+// GET /api/activities/:id/
+router.get('/:id', async (req, res, next) => {
+  //const {id} = req.params
   try {
-    const activity = await createActivity(activityData);
-    if (!activity) {
-      next({
-        name: "ErrorGettingActivities",
-        message: "Activity does not exist",
-      });
-    }
-    res.send({ activity });
+    const singleActivity = await getActivityById(req.params.id);
+    res.send(singleActivity)
+    
   } catch (error) {
     next(error);
   }
 });
-// PATCH /api/activities/:activityId
-router.patch('/:activityId', requireUser, async (req, res, next) => {
-  const { activityId } = req.params;
-  const { name, description } = req.body;
-  const updateFields = {};
-  if (name) {
-    updateFields.name = name;
-  }
-  if (description) {
-    updateFields.description = description;
-  }
+
+// GET /api/activities
+router.get('/', async (req, res, next) => {
   try {
-    if (req.user) {
-      const updatedActivity = await updateActivity(activityId, updateFields);
-      res.send({ activity: updatedActivity });
-    } else {
+    const activities = await getAllActivities();
+    res.send(activities);
+  } catch (error) {
+    next(error)
+  }
+})
+
+// POST /api/activities
+router.post('/', requireUser, requiredNotSent({requiredParams: ['name', 'description']}), async (req, res, next) => {
+  try {
+    const {name, description} = req.body;
+    const existingActivity = await getActivityByName(name);
+    if(existingActivity) {
       next({
-        name: "UserNotLoggedIn",
-        message: "Login to update activity",
+        name: 'NotFound',
+        message: `An activity with name ${name} already exists`
       });
+    } else {
+      const createdActivity = await createActivity({name, description});
+      if(createdActivity) {
+        res.send(createdActivity);
+      } else {
+        next({
+          name: 'FailedToCreate',
+          message: 'There was an error creating your activity'
+        })
+      }
     }
-  } catch ({ name, description }) {
-    next({ name, description });
+  } catch (error) {
+    next(error);
   }
 });
+
+// PATCH /api/activities/:activityId
+router.patch('/:activityId', requireUser, requiredNotSent({requiredParams: ['name', 'description'], atLeastOne: true}), async (req, res, next) => {
+  try {
+    const {activityId} = req.params;
+    const existingActivity = await getActivityById(activityId);
+    if(!existingActivity) {
+      next({
+        name: 'NotFound',
+        message: `No activity by ID ${activityId}`
+      });
+    } else {
+      const {name, description} = req.body;
+      const updatedActivity = await updateActivity({id: activityId, name, description})
+      if(updatedActivity) {
+        res.send(updatedActivity);
+      } else {
+        next({
+          name: 'FailedToUpdate',
+          message: 'There was an error updating your activity'
+        })
+      }
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;
-
-
